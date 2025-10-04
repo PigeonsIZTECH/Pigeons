@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Seçilebilir ABD Haritası — İnteraktif</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0b1220; --panel:#071026; --muted:#9aa7bf; --accent:#60a5fa; --selected:#ffb86b;
+    font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:linear-gradient(180deg,var(--bg),#041024);color:#e6eef8;min-height:100vh;display:flex;gap:16px;padding:18px}
+  .panel{width:320px;background:linear-gradient(180deg,#071226,#041020);padding:16px;border-radius:12px;box-shadow:0 8px 30px rgba(0,0,0,.6)}
+  h1{margin:0 0 8px;font-size:16px}
+  p.muted{color:var(--muted);margin:6px 0 12px;font-size:13px}
+  input[type="search"]{width:100%;padding:10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit}
+  button{padding:8px 10px;border-radius:8px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;cursor:pointer;margin-right:6px}
+  button.primary{background:linear-gradient(180deg,var(--accent),#3b82f6);color:#021025;border:none}
+  .map-wrap{flex:1;border-radius:12px;overflow:hidden;position:relative;background:#061528;padding:12px;display:flex;align-items:center;justify-content:center}
+  svg{width:100%;height:100%;max-height:calc(100vh - 72px)}
+  .state{fill:#0f2130;stroke:#163246;stroke-width:.6;cursor:pointer}
+  .state:hover{filter:brightness(1.15)}
+  .state.selected{fill:var(--selected);stroke:#7a4a2a}
+  .state:focus{outline:none;stroke-width:1.6;stroke:#88c0ff}
+  #tooltip{position:absolute;pointer-events:none;padding:8px 10px;border-radius:8px;background:linear-gradient(180deg,#071122,#041018);border:1px solid rgba(255,255,255,0.04);font-size:13px;color:#dff0ff;display:none}
+  .footer{margin-top:12px;font-size:13px;color:var(--muted)}
+  .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+  .small{font-size:12px;padding:6px 8px}
+  .kbd{background:#071726;border-radius:4px;padding:2px 6px;font-weight:600;color:var(--muted)}
+</style>
+</head>
+<body>
+ <div class="panel" role="region" aria-label="Controls">
+  <h1>Selectable U.S. Map</h1>
+  <p class="muted">Click on the states. Multi-select: <span class="kbd">Ctrl</span> or <span class="kbd">Shift</span>.</p>
+  <label for="search" class="sr-only">Search state</label>
+  <input id="search" type="search" placeholder="Search state (e.g., Texas)" aria-label="Search state" />
+  <div class="controls">
+    <button id="clear" class="small">Clear Selection</button>
+    <button id="export" class="primary small">Copy Selection (JSON)</button>
+    <button id="zoomIn" class="small">+</button>
+    <button id="zoomOut" class="small">−</button>
+    <button id="reset" class="small">Reset</button>
+  </div>
+  <div class="footer">
+    <div style="margin-top:10px">Accessibility: Use <kbd>Tab</kbd> to navigate states and <kbd>Enter</kbd> to select.</div>
+    <div style="margin-top:8px;color:var(--muted)">Data source: us-atlas (TopoJSON). Internet connection required.</div>
+  <button id="gotoAirQuality" class="primary small">
+  <i class="fas fa-home"></i> Click to check air quality
+</button>
+
+<script>
+const gotoBtn = document.getElementById("gotoAirQuality");
+
+gotoBtn.addEventListener("click", function(e){
+  if(window.__usmap.selected.size === 0){
+    alert("Lütfen bir eyalet seçin!");
+    return; // seçilmediyse sayfa geçişi durur
+  }
+
+  // Animasyon: fade out
+  document.body.style.transition = "opacity 0.6s ease";
+  document.body.style.opacity = 0;
+
+  // 0.6s sonra sayfayı yönlendir
+  setTimeout(() => {
+    window.location.href = "index.html";
+  }, 600);
+});
+</script>
+
+  </div>
+
+</div>
+
+
+  <div class="map-wrap" role="region" aria-label="ABD Haritası">
+    <div id="tooltip" role="tooltip"></div>
+    <svg id="svg" viewBox="0 0 975 610" preserveAspectRatio="xMidYMid meet" aria-hidden="false" tabindex="0"></svg>
+  </div>
+
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="https://unpkg.com/topojson-client@3/dist/topojson-client.min.js"></script>
+<script>
+(async function(){
+  const svg = d3.select("#svg");
+  const tooltip = d3.select("#tooltip");
+  const width = 975, height = 610;
+  const g = svg.append("g");
+
+  // TopoJSON kaynağı (us-atlas)
+  const topoUrl = "https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json";
+
+  // Yükle
+  const topo = await fetch(topoUrl).then(r=>r.json());
+  const states = topojson.feature(topo, topo.objects.states);
+  // Eyalet isimleri için id->name eşlemesi
+  // us-atlas içinde 'states' objesinde id'ler numeric. kullanıcının rahat araması için bir isim listesi:
+  // Basit isim listesi (federal isimleri) - kesin eşleştirme için FIPS->isim map gerekiyor.
+  // Aşağıda FIPS->name map'i ekledim (50 eyalet + DC).
+  const idToName = {
+    "1":"Alabama","2":"Alaska","4":"Arizona","5":"Arkansas","6":"California","8":"Colorado","9":"Connecticut","10":"Delaware","11":"District of Columbia",
+    "12":"Florida","13":"Georgia","15":"Hawaii","16":"Idaho","17":"Illinois","18":"Indiana","19":"Iowa","20":"Kansas","21":"Kentucky","22":"Louisiana",
+    "23":"Maine","24":"Maryland","25":"Massachusetts","26":"Michigan","27":"Minnesota","28":"Mississippi","29":"Missouri","30":"Montana","31":"Nebraska",
+    "32":"Nevada","33":"New Hampshire","34":"New Jersey","35":"New Mexico","36":"New York","37":"North Carolina","38":"North Dakota","39":"Ohio","40":"Oklahoma",
+    "41":"Oregon","42":"Pennsylvania","44":"Rhode Island","45":"South Carolina","46":"South Dakota","47":"Tennessee","48":"Texas","49":"Utah","50":"Vermont",
+    "51":"Virginia","53":"Washington","54":"West Virginia","55":"Wisconsin","56":"Wyoming"
+  };
+
+  // Projection & path
+  const projection = d3.geoAlbersUsa().translate([width/2, height/2]).scale(1000);
+  const path = d3.geoPath(projection);
+
+  // Draw states
+  g.selectAll("path")
+    .data(states.features)
+    .join("path")
+    .attr("class","state")
+    .attr("d", path)
+    .attr("tabindex", 0)
+    .attr("role","button")
+    .attr("aria-pressed","false")
+    .each(function(d){
+      // attach name
+      d.properties.name = idToName[String(d.id)] || d.properties.name || "Unknown";
+    })
+    .on("mouseenter focus", function(event,d){
+      const [mx,my] = d3.pointer(event, document.body);
+      tooltip.style("display","block")
+             .style("left", (mx + 12) + "px")
+             .style("top", (my + 12) + "px")
+             .html(`<strong>${d.properties.name}</strong>`);
+    })
+    .on("mousemove", function(event){
+      const [mx,my] = d3.pointer(event, document.body);
+      tooltip.style("left", (mx + 12) + "px").style("top", (my + 12) + "px");
+    })
+    .on("mouseleave blur", function(){ tooltip.style("display","none"); })
+    .on("click", function(event,d){
+      // multi-select with Ctrl / Shift
+      const el = d3.select(this);
+      const multi = event.ctrlKey || event.metaKey || event.shiftKey;
+      if(!multi){
+        // single select => clear others
+        clearSelection();
+        toggleSelect(el,d);
+      } else {
+        toggleSelect(el,d);
+      }
+    })
+    .on("keydown", function(event,d){
+      if(event.key === "Enter" || event.key === " "){
+        event.preventDefault();
+        const el = d3.select(this);
+        toggleSelect(el,d);
+      }
+    });
+
+  // Zoom & pan
+  const zoom = d3.zoom().scaleExtent([0.7, 8]).on("zoom", (event) => g.attr("transform", event.transform));
+  svg.call(zoom);
+
+  // Controls
+  const selected = new Map(); // id -> feature
+  function toggleSelect(el,d){
+    const id = d.id;
+    if(selected.has(id)){
+      selected.delete(id);
+      el.classed("selected", false).attr("aria-pressed","false");
+    } else {
+      selected.set(id,d);
+      el.classed("selected", true).attr("aria-pressed","true");
+    }
+  }
+  function clearSelection(){
+    selected.clear();
+    g.selectAll(".state").classed("selected", false).attr("aria-pressed","false");
+  }
+
+  document.getElementById("clear").addEventListener("click", clearSelection);
+  document.getElementById("export").addEventListener("click", ()=>{
+    const arr = Array.from(selected.values()).map(f=>({id:f.id,name:f.properties.name}));
+    const json = JSON.stringify(arr, null, 2);
+    // kopyala panoya
+    navigator.clipboard?.writeText(json).then(()=> {
+      alert("Seçim JSON panoya kopyalandı (" + arr.length + " adet).");
+    }, ()=>{
+      // fallback: göster
+      prompt("Seçim JSON (kopyalamak için kopyala):", json);
+    });
+  });
+
+  // Search
+  const search = document.getElementById("search");
+  search.addEventListener("input", (e)=>{
+    const q = e.target.value.trim().toLowerCase();
+    if(!q){ g.selectAll(".state").style("opacity",1); return; }
+    g.selectAll(".state").style("opacity", d => (d.properties.name.toLowerCase().includes(q) ? 1 : 0.18));
+  });
+  search.addEventListener("keydown", (e)=>{
+    if(e.key === "Enter"){
+      const q = e.target.value.trim().toLowerCase();
+      if(!q) return;
+      const found = states.features.find(f => f.properties.name.toLowerCase() === q || f.properties.name.toLowerCase().includes(q));
+      if(found){
+        // focus and zoom to feature
+        const [[x0,y0],[x1,y1]] = path.bounds(found);
+        const dx = x1 - x0, dy = y1 - y0;
+        const x = (x0 + x1) / 2, y = (y0 + y1) / 2;
+        const scale = Math.max(1, Math.min(8, 0.9 / Math.max(dx/width, dy/height)));
+        const translate = [width/2 - scale * x, height/2 - scale * y];
+        svg.transition().duration(700).call(zoom.transform, d3.zoomIdentity.translate(translate[0],translate[1]).scale(scale));
+        // also focus the element
+        const el = g.selectAll(".state").filter(d=>d === found).node();
+        if(el){ el.focus(); }
+      } else {
+        alert("Eyalet bulunamadı.");
+      }
+    }
+  });
+
+  // Zoom buttons
+  document.getElementById("zoomIn").addEventListener("click", ()=>{
+    svg.transition().call(zoom.scaleBy, 1.4);
+  });
+  document.getElementById("zoomOut").addEventListener("click", ()=>{
+    svg.transition().call(zoom.scaleBy, 1/1.4);
+  });
+  document.getElementById("reset").addEventListener("click", ()=>{
+    svg.transition().duration(700).call(zoom.transform, d3.zoomIdentity);
+  });
+
+  // Small accessibility: allow Esc to clear search
+  document.addEventListener("keydown", (e)=>{
+    if(e.key === "Escape"){ search.value=""; search.dispatchEvent(new Event('input')); }
+  });
+
+  // Initial fit (calculate bounding box and center)
+  (function fitToBox(){
+    const b = path.bounds(states);
+    const dx = b[1][0] - b[0][0], dy = b[1][1] - b[0][1];
+    const x = (b[0][0] + b[1][0]) / 2, y = (b[0][1] + b[1][1]) / 2;
+    const scale = Math.max(.7, Math.min(1.6, 0.9 / Math.max(dx/width, dy/height)));
+    const translate = [width/2 - scale * x, height/2 - scale * y];
+    svg.call(zoom.transform, d3.zoomIdentity.translate(translate[0],translate[1]).scale(scale));
+  })();
+
+  // Expose for debugging (optional)
+  window.__usmap = {states, selected};
+
+})();
+
+</script>
+</body>
+</html>
+<!-- index.html -->
+
+</script>
+</body>
+<script>
+on("mouseenter focus", function(event,d){
+  tooltip.style("display","block")
+         .html(`<strong>${d.properties.name}</strong>`);
+  moveTooltip(event); // pozisyonu ayarla
+})
+.on("mousemove", moveTooltip)
+.on("mouseleave blur", function(){ tooltip.style("display","none"); })
+
+function moveTooltip(event){
+  const [mx,my] = d3.pointer(event, document.body);
+  const tooltipWidth = tooltip.node().offsetWidth;
+  const tooltipHeight = tooltip.node().offsetHeight;
+  const pageWidth = window.innerWidth;
+  const pageHeight = window.innerHeight;
+
+  let left = mx + 8; // fareye daha yakın
+  let top = my + 8;
+
+  // ekran dışına taşmasını önle
+  if(left + tooltipWidth > pageWidth) left = mx - tooltipWidth - 8;
+  if(top + tooltipHeight > pageHeight) top = my - tooltipHeight - 8;
+
+  tooltip.style("left", left + "px")
+         .style("top", top + "px");
+}
+
+</script>

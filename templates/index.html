@@ -19,8 +19,8 @@
   --muted: rgba(255,255,255,0.75);
   --glass-border: rgba(255,255,255,0.06);
 }
-* { box-sizing: border-box; margin:0; padding:0; }
-html, body { height: 100%; font-family:'Inter', sans-serif; background: linear-gradient(135deg,var(--accent1),var(--accent2) 50%,var(--accent3)); color:#eef2ff; }
+  * { box-sizing: border-box; margin:0; padding:0; }
+html, body { height: 110%; font-family:'Inter', sans-serif; background: linear-gradient(135deg,var(--accent1),var(--accent2) 50%,var(--accent3)); color:#eef2ff; }
 body { display:flex; flex-direction:column; min-height:100vh; padding:28px; gap:18px; }
 
 header {
@@ -99,7 +99,22 @@ svg.gauge { width:320px; height:200px; overflow:visible; display:block; }
 .info-empty p { font-size:0.92rem; color:#3b4752; opacity:0.95; }
 
 footer { max-width:1200px; margin:0 auto; color:rgba(255,255,255,0.85); font-size:0.9rem; display:flex; justify-content:space-between; width:100%;}
-footer a { color:inherit; text-decoration:none; opacity:0.9; }
+footer a { color:inherit; text-decoration:none; opacity:0.9;align-items: center; }
+footer{
+    display: flex;
+    left: 20000000000000px;
+    margin-left: auto;
+}
+footer {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  width: 100%;
+  color: white;
+  padding: 10px 20px;
+  display: flex;
+  justify-content: space-between;
+}
 
 @media(max-width:980px){
   .stage { grid-template-columns:1fr; }
@@ -468,7 +483,6 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
 </footer>
 
 <div class="alert-container" id="alertContainer"></div>
-
 <script>
   document.addEventListener('DOMContentLoaded', () => {
     // --- 💡 1: KONFİGÜRASYON MERKEZİ ---
@@ -506,35 +520,91 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
     // Otomatik yenileme zamanlayıcısı
     let autoRefreshInterval = null;
 
+    // --- PYTHON BAĞLANTISI İÇİN YENİ KODLAR ---
+    
     /**
-     * Sahte bir sensörden asenkron olarak veri alır.
+     * Python'dan veri almak için API endpoint'i
+     * Bu URL'yi Python backend'inize göre değiştirin
+     */
+    const PYTHON_API_URL = 'http://localhost:5000/api/air-quality'; // Örnek URL
+    
+    /**
+     * Python'dan gerçek zamanlı veri alır
      * @returns {Promise<object>} Hava kalitesi verilerini içeren bir Promise.
      */
-    async function getSensorData() {
-        // Gerçek bir API çağrısını simüle etmek için bekleme süresi
+    async function getPythonSensorData() {
+        try {
+            const response = await fetch(PYTHON_API_URL, {
+                method: 'GET',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                // Eğer backend'inizde CORS sorunu yaşıyorsanız:
+                // mode: 'cors',
+                // credentials: 'same-origin'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            
+            const data = await response.json();
+            
+            // Python'dan gelen veriyi uygun formata dönüştür
+            return {
+                aqi: data.aqi || data.air_quality_index || 0,
+                dominant_pollutant: data.dominant_pollutant || "pm25",
+                pollutants: {
+                    pm25: { 
+                        value: data.pm25 || data.pollutants?.pm25 || 0, 
+                        unit: "µg/m³" 
+                    },
+                    pm10: { 
+                        value: data.pm10 || data.pollutants?.pm10 || 0, 
+                        unit: "µg/m³" 
+                    },
+                    o3: { 
+                        value: data.o3 || data.pollutants?.o3 || 0, 
+                        unit: "ppm" 
+                    },
+                    no2: { 
+                        value: data.no2 || data.pollutants?.no2 || 0, 
+                        unit: "ppm" 
+                    },
+                },
+                timestamp: data.timestamp || new Date().toISOString(),
+                location: data.location || "Unknown"
+            };
+            
+        } catch (error) {
+            console.error('Python API bağlantı hatası:', error);
+            
+            // Fallback: Python bağlantısı başarısız olursa simülasyon kullan
+            console.log('Python bağlantısı başarısız, simülasyon moduna geçiliyor...');
+            return getSimulatedSensorData();
+        }
+    }
+
+    /**
+     * Python bağlantısı başarısız olursa kullanılacak simülasyon verisi
+     */
+    async function getSimulatedSensorData() {
         await new Promise(resolve => setTimeout(resolve, 1500));
         
-        // Daha gerçekçi veri dağılımı için rastgele AQI
-        // Daha yüksek AQI değerlerinin daha az olası olması için
         const randomValue = Math.random();
         let aqi;
         
         if (randomValue < 0.6) {
-            // %60 ihtimalle iyi/orta AQI (0-100)
             aqi = Math.floor(Math.random() * 100);
         } else if (randomValue < 0.85) {
-            // %25 ihtimalle hassas gruplar için sağlıksız (100-150)
             aqi = Math.floor(Math.random() * 50) + 100;
         } else if (randomValue < 0.95) {
-            // %10 ihtimalle sağlıksız (150-200)
             aqi = Math.floor(Math.random() * 50) + 150;
         } else {
-            // %5 ihtimalle çok sağlıksız/tehlikeli (200-500)
             aqi = Math.floor(Math.random() * 300) + 200;
         }
         
-        // Simüle edilmiş kirletici verileri
-        const data = {
+        return {
             aqi: aqi,
             dominant_pollutant: "pm25",
             pollutants: {
@@ -542,29 +612,115 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
                 pm10: { value: (aqi * 0.75).toFixed(1), unit: "µg/m³" },
                 o3: { value: (aqi * 0.0005).toFixed(3), unit: "ppm" },
                 no2: { value: (aqi * 0.0003).toFixed(3), unit: "ppm" },
-            }
+            },
+            timestamp: new Date().toISOString(),
+            location: "Simulation"
         };
-        return data;
     }
 
     /**
-     * AQI değerine göre ilgili kategori bilgilerini bulur.
-     * @param {number} aqi - Hava Kalitesi İndeksi değeri.
-     * @returns {object} Kategori, renk ve açıklama bilgilerini içeren nesne.
+     * WebSocket ile Python'dan gerçek zamanlı veri almak için
+     * (Opsiyonel - gerçek zamanlı veri için)
      */
+    function setupPythonWebSocket() {
+        const wsUrl = 'ws://localhost:5000/ws/air-quality'; // WebSocket URL'nizi buraya yazın
+        
+        try {
+            const ws = new WebSocket(wsUrl);
+            
+            ws.onopen = function() {
+                console.log('Python WebSocket bağlantısı kuruldu');
+                // Bağlantı durumunu göstermek için UI güncellemesi
+                updateConnectionStatus('Connected to Python (Real-time)');
+            };
+            
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+                    console.log('Python\'dan gerçek zamanlı veri alındı:', data);
+                    
+                    // Veriyi işle
+                    processRealTimeData(data);
+                } catch (error) {
+                    console.error('WebSocket veri işleme hatası:', error);
+                }
+            };
+            
+            ws.onclose = function() {
+                console.log('Python WebSocket bağlantısı kapandı');
+                updateConnectionStatus('Disconnected from Python');
+                
+                // Yeniden bağlanmayı dene
+                setTimeout(setupPythonWebSocket, 5000);
+            };
+            
+            ws.onerror = function(error) {
+                console.error('WebSocket hatası:', error);
+                updateConnectionStatus('Connection Error');
+            };
+            
+        } catch (error) {
+            console.error('WebSocket kurulum hatası:', error);
+        }
+    }
+
+    /**
+     * Gerçek zamanlı veriyi işler
+     */
+    function processRealTimeData(data) {
+        const formattedData = {
+            aqi: data.aqi || 0,
+            dominant_pollutant: data.dominant_pollutant || "pm25",
+            pollutants: {
+                pm25: { value: data.pm25 || 0, unit: "µg/m³" },
+                pm10: { value: data.pm10 || 0, unit: "µg/m³" },
+                o3: { value: data.o3 || 0, unit: "ppm" },
+                no2: { value: data.no2 || 0, unit: "ppm" },
+            },
+            timestamp: data.timestamp || new Date().toISOString()
+        };
+        
+        // UI'ı güncelle
+        updateGauge(formattedData.aqi);
+        updateInfoCard(formattedData);
+        
+        // Uyarı kontrolü
+        if (formattedData.aqi >= ALERT_THRESHOLD) {
+            const pollutantName = formattedData.dominant_pollutant.toUpperCase();
+            const msg = `Real-time Alert! AQI ${formattedData.aqi} detected! Dominant pollutant: ${pollutantName}`;
+            showAlert(msg);
+            logAlertMessage(msg);
+        }
+    }
+
+    /**
+     * Bağlantı durumunu günceller
+     */
+    function updateConnectionStatus(status) {
+        const statusElement = document.querySelector('.sensor-status');
+        if (statusElement) {
+            statusElement.textContent = status;
+        }
+    }
+
+    // --- MEVCUT FONKSİYONLAR (Python entegrasyonu için güncellendi) ---
+    
+    /**
+     * Ana veri alma fonksiyonu - Python API'sini kullanır
+     */
+    async function getSensorData() {
+        // Python API'sini kullan
+        return await getPythonSensorData();
+    }
+
+    // AQI değerine göre kategori bulma (değişmedi)
     function getAqiInfo(aqi) {
         return AQI_LEVELS.find(level => aqi <= level.limit) || AQI_LEVELS[AQI_LEVELS.length - 1];
     }
     
-    /**
-     * Bir değeri başlangıçtan bitişe doğru akıcı bir animasyonla günceller.
-     * @param {HTMLElement} element - Sayının gösterileceği element.
-     * @param {number} endValue - Hedef değer.
-     * @param {number} duration - Animasyon süresi (ms).
-     */
+    // Değer animasyonu (değişmedi)
     function animateValue(element, endValue, duration = 1000) {
         let startTimestamp = null;
-        // mevcut değeri temiz metin olarak al (içerikte birim olabilir)
         const currentText = element.textContent || '';
         const startValue = parseInt(currentText.replace(/[^0-9\-]/g, '')) || 0;
         const step = (timestamp) => {
@@ -579,19 +735,15 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         window.requestAnimationFrame(step);
     }
 
-    /**
-     * Gösterge ibresinin dönüşünü ve renklerini akıcı animasyonlar için CSS'e devreder.
-     * @param {number} aqi - Hava Kalitesi İndeksi değeri.
-     */
+    // Gösterge güncelleme (değişmedi)
     function updateGauge(aqi) {
         const aqiClamped = Math.min(Math.max(aqi, 0), 500);
         let rotation;
 
-        // Doğrusal olmayan ölçek (0-100 arası ilk yarı, 100-500 arası ikinci yarı)
         if (aqiClamped <= 100) {
-            rotation = (aqiClamped / 100) * 90 - 90; // -90..0
+            rotation = (aqiClamped / 100) * 90 - 90;
         } else {
-            rotation = ((aqiClamped - 100) / 400) * 90; // 0..90
+            rotation = ((aqiClamped - 100) / 400) * 90;
         }
 
         needle.style.setProperty('--rotation-deg', `${rotation}deg`);
@@ -602,10 +754,7 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         gaugeCategory.style.color = aqiInfo.color;
     }
 
-    /**
-     * Bilgi kartını oluşturur ve dominant kirleticiyi vurgular.
-     * @param {object} data - Sensörden gelen tüm veriler.
-     */
+    // Bilgi kartı güncelleme (Python verileri için güncellendi)
     function updateInfoCard(data) {
         const aqiInfo = getAqiInfo(data.aqi);
 
@@ -619,11 +768,20 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
             `;
         }).join('');
 
+        // Konum ve zaman bilgisi ekle
+        const locationInfo = data.location ? `
+            <div class="card-section">
+                <h3 class="card-subtitle"><i class="fas fa-map-marker-alt"></i>Location</h3>
+                <p class="card-text">${data.location}</p>
+            </div>
+        ` : '';
+
         infoContent.innerHTML = `
             <div class="card-section">
                 <h2 class="card-title">Analysis Results</h2>
                 <p class="card-category" style="color:${aqiInfo.color};">${aqiInfo.category}</p>
             </div>
+            ${locationInfo}
             <div class="card-section">
                 <h3 class="card-subtitle"><i class="fas fa-info-circle"></i>Air Quality Description</h3>
                 <p class="card-text">${aqiInfo.description}</p>
@@ -636,17 +794,16 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
                 <h3 class="card-subtitle"><i class="fas fa-smog"></i>Pollutant Details</h3>
                 ${pollutantHTML}
             </div>
+            <div class="card-section">
+                <h3 class="card-subtitle"><i class="fas fa-clock"></i>Last Update</h3>
+            </div>
         `;
         
-        // Kartın içeriği dolduktan sonra görünür hale getiriyoruz
         infoContent.classList.remove('info-empty');
         infoContent.classList.add('info-visible');
     }
     
-    /**
-     * Uyarı mesajını kaydeder.
-     * @param {string} message - Kaydedilecek uyarı mesajı.
-     */
+    // Uyarı kaydetme (değişmedi)
     function logAlertMessage(message) {
         let alerts = JSON.parse(localStorage.getItem("alertMessages") || "[]");
         alerts.push({
@@ -654,7 +811,6 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
             timestamp: new Date().toISOString()
         });
         
-        // Son 50 uyarıyı sakla
         if (alerts.length > 50) {
             alerts = alerts.slice(-50);
         }
@@ -663,9 +819,7 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         updateHistoryDisplay();
     }
 
-    /**
-     * Uyarı geçmişini görüntüler.
-     */
+    // Geçmiş görüntüleme (değişmedi)
     function updateHistoryDisplay() {
         const alerts = JSON.parse(localStorage.getItem("alertMessages") || "[]");
         
@@ -676,19 +830,14 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         
         historyList.innerHTML = alerts.map(alert => `
             <div class="history-item">
-                <div class="history-time">${new Date(alert.timestamp).toLocaleString()}</div>
                 <div class="history-message">${alert.message}</div>
             </div>
         `).join('');
         
-        // En yeni uyarılar üstte görünsün
         historyList.scrollTop = 0;
     }
 
-    /**
-     * Uyarı gösterir.
-     * @param {string} message - Gösterilecek uyarı mesajı.
-     */
+    // Uyarı gösterme (değişmedi)
     function showAlert(message) {
         const alert = document.createElement('div');
         alert.className = 'alert';
@@ -707,12 +856,10 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         
         alertContainer.appendChild(alert);
         
-        // Animasyon için kısa gecikme
         setTimeout(() => {
             alert.classList.add('show');
         }, 10);
         
-        // Kapatma işlevi
         const closeBtn = alert.querySelector('.alert-close');
         closeBtn.addEventListener('click', () => {
             alert.classList.remove('show');
@@ -723,7 +870,6 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
             }, 400);
         });
         
-        // Otomatik kapatma
         setTimeout(() => {
             if (alert.classList.contains('show')) {
                 alert.classList.remove('show');
@@ -735,7 +881,6 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
             }
         }, 7000);
         
-        // Ses uyarısı
         if (soundAlerts.checked) {
             const audio = new Audio(ALERT_SOUND_URL);
             audio.play().catch(() => {
@@ -743,7 +888,6 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
             });
         }
         
-        // Tarayıcı bildirimi
         if (browserNotifications.checked && Notification.permission === "granted") {
             new Notification("Air Quality Alert", {
                 body: message,
@@ -752,9 +896,7 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         }
     }
 
-    /**
-     * Arayüzü bir sonraki ölçüm için sıfırlar.
-     */
+    // UI sıfırlama (değişmedi)
     function resetUI() {
         needle.style.setProperty('--rotation-deg', '-90deg');
         gaugeNumeric.innerHTML = `0 <span class="gauge-unit">AQI</span>`;
@@ -763,9 +905,7 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         infoContent.classList.remove('info-visible');
     }
 
-    /**
-     * Otomatik yenilemeyi başlatır veya durdurur.
-     */
+    // Otomatik yenileme (değişmedi)
     function toggleAutoRefresh() {
         if (autoRefresh.checked) {
             if (!autoRefreshInterval) {
@@ -779,16 +919,12 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
         }
     }
 
-    /**
-     * Ölçüm simülasyonunu çalıştırır.
-     */
+    // Ölçüm simülasyonu (Python entegrasyonu için güncellendi)
     async function simulateMeasurement() {
-        // Buton durumunu ayarla
         btnTitle.textContent = "Measuring...";
-        btnDesc.textContent = "Please wait, fetching sensor data.";
+        btnDesc.textContent = "Fetching data from Python...";
         calculateBtn.disabled = true;
         
-        // Bir önceki sonuçları temizle ve animasyonlu geçiş sağla
         infoContent.classList.remove('info-visible');
         await new Promise(resolve => setTimeout(resolve, 300));
 
@@ -797,7 +933,6 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
             updateGauge(data.aqi);
             updateInfoCard(data);
             
-            // Uyarı kontrolü
             if (data.aqi >= ALERT_THRESHOLD) {
                 const pollutantName = (data.dominant_pollutant || '').toUpperCase();
                 const msg = `Danger! AQI ${data.aqi} detected! Dominant pollutant: ${pollutantName}`;
@@ -809,7 +944,6 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
             infoContent.innerHTML = `<div class="card-section error"><h2>Error</h2><p>Could not fetch data from the sensor. Please try again later.</p></div>`;
             infoContent.classList.add('info-visible');
         } finally {
-            // Butonu tekrar aktif hale getir
             btnTitle.textContent = "Calculate Air Pollution";
             btnDesc.textContent = "Click to start a new measurement";
             calculateBtn.disabled = false;
@@ -836,6 +970,9 @@ footer a { color:inherit; text-decoration:none; opacity:0.9; }
     
     // Otomatik yenilemeyi başlat
     toggleAutoRefresh();
+    
+    // Python WebSocket bağlantısını kur (opsiyonel)
+    // setupPythonWebSocket();
 });
 </script>
 </body>
